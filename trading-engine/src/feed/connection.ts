@@ -29,7 +29,7 @@ export class FeedConnection {
 
     this.ws.on('message', (data: Buffer) => {
       const msg = JSON.parse(data.toString());
-      this.buffer.push(msg.data);
+      this.buffer.push(msg);
     });
 
     setTimeout(async () => await this.sync(), 1000);
