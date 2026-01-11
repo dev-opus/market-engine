@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
+import { RedisService } from './redis';
 
 type OrderBookUpdateEvent = {
   exchange: string;
@@ -10,18 +11,21 @@ type OrderBookUpdateEvent = {
 @Injectable()
 export class Arbitrage {
   private books = new Map<string, { bid: number; ask: number }>();
-  constructor(private events: EventEmitter2) {}
+  constructor(
+    private events: EventEmitter2,
+    private redis: RedisService,
+  ) {}
 
   @OnEvent('orderbook.update')
-  onUpdate(update: OrderBookUpdateEvent) {
+  async onUpdate(update: OrderBookUpdateEvent) {
     this.books.set(update.exchange, {
       bid: update.bestBid,
       ask: update.bestAsk,
     });
-    this.checkArbitrage();
+    await this.checkArbitrage();
   }
 
-  private checkArbitrage() {
+  private async checkArbitrage() {
     if (this.books.size < 2) return;
 
     let bestBuy = { ex: '', price: Infinity };
@@ -36,19 +40,30 @@ export class Arbitrage {
       }
     }
 
+    const fingerprint = `buy:${bestBuy.ex}-sell:${bestSell.ex}-buyPrice:${bestBuy.price}-sellPrice:${bestSell.price}`;
+    const redisClient = this.redis.getClient();
+    const exists = await redisClient.get(fingerprint);
+    if (exists) {
+      console.log('Arbitrage opportunity already processed recently');
+      return;
+    }
+    await redisClient.set(fingerprint, '1', { EX: 60 });
+
     // Guard against no valid prices found
     if (bestBuy.price === Infinity || bestSell.price === -Infinity) return;
-
     const profit = bestSell.price - bestBuy.price;
+
     if (profit > 0.5) {
-      this.events.emit('arbitrage.opportunity', {
+      const opportunity = {
         buyFrom: bestBuy.ex,
         sellTo: bestSell.ex,
         buyPrice: bestBuy.price,
         sellPrice: bestSell.price,
         profit,
         timestamp: Date.now(),
-      });
+      };
+
+      this.events.emit('arbitrage.opportunity', opportunity);
     }
   }
 }
