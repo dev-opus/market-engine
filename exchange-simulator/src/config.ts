@@ -7,7 +7,7 @@ export class Config {
   private logger: Logger;
 
   constructor() {
-    this.logger = log4js.getLogger('MarketSimulator');
+    this.logger = log4js.getLogger('exchange-simulator');
 
     log4js.configure({
       appenders: {
