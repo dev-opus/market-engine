@@ -1,10 +1,19 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { FeedModule } from './feed/feed.module';
+import { ExecutionModule } from './execution/execution.module';
+import { OrderbookModule } from './orderbook/orderbook.module';
+import { ArbitrageModule } from './arbitrage/arbitrage.module';
+import { PersistenceModule } from './persistence/persistence.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    FeedModule,
+    ExecutionModule,
+    OrderbookModule,
+    ArbitrageModule,
+    PersistenceModule,
+  ],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}
