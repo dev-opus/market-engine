@@ -9,8 +9,8 @@ export class OrderBook {
   private readonly SYMBOL = 'BTCUSDT';
 
   constructor(private logger: Logger) {
-    this.mid = 45000;
     this.lastUpdateId = 5000;
+    this.mid = Number(process.env.MID);
     this.bids = this.generateInitialBook('bid');
     this.asks = this.generateInitialBook('ask');
     this.logger.info('OrderBook initialized');
