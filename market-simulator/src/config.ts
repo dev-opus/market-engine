@@ -27,7 +27,7 @@ export class Config {
   }
 
   ensureEnvVariables(): void {
-    const requiredVars = ['PORT', 'EXCHANGE'];
+    const requiredVars = ['MID', 'PORT', 'EXCHANGE'];
 
     requiredVars.forEach((varName) => {
       if (!process.env[varName]) {
