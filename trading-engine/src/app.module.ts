@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { FeedModule } from './feed/feed.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ExecutionModule } from './execution/execution.module';
-import { OrderbookModule } from './orderbook/orderbook.module';
 import { ArbitrageModule } from './arbitrage/arbitrage.module';
 import { PersistenceModule } from './persistence/persistence.module';
 
@@ -9,11 +10,10 @@ import { PersistenceModule } from './persistence/persistence.module';
   imports: [
     FeedModule,
     ExecutionModule,
-    OrderbookModule,
     ArbitrageModule,
     PersistenceModule,
+    EventEmitterModule.forRoot(),
+    ConfigModule.forRoot({ isGlobal: true }),
   ],
-  controllers: [],
-  providers: [],
 })
 export class AppModule {}
