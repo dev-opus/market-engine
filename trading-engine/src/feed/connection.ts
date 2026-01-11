@@ -12,8 +12,9 @@ type DepthEvent = {
 
 export class FeedConnection {
   private ws!: WebSocket;
-  private buffer: DepthEvent[] = [];
+  private synced = false;
   private lastUpdateId = 0;
+  private buffer: DepthEvent[] = [];
 
   private bids = new Map<string, string>();
   private asks = new Map<string, string>();
@@ -29,7 +30,12 @@ export class FeedConnection {
 
     this.ws.on('message', (data: Buffer) => {
       const msg = JSON.parse(data.toString());
-      this.buffer.push(msg);
+
+      if (this.synced) {
+        this.processMessage(msg);
+      } else {
+        this.buffer.push(msg);
+      }
     });
 
     setTimeout(async () => await this.sync(), 1000);
@@ -68,6 +74,19 @@ export class FeedConnection {
     }
 
     this.buffer = [];
+    this.synced = true;
+  }
+
+  private processMessage(event: DepthEvent) {
+    // Validate sequence
+    if (event.pu !== this.lastUpdateId) {
+      console.log(`[${this.exchange}] Out of sequence, resyncing...`);
+      this.resync();
+      return;
+    }
+
+    this.apply(event);
+    this.lastUpdateId = event.u;
   }
 
   private apply(event: DepthEvent) {
@@ -100,6 +119,7 @@ export class FeedConnection {
   }
 
   private async resync() {
+    this.synced = false;
     this.buffer = [];
     await this.sync();
   }
