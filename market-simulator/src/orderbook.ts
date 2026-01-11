@@ -50,20 +50,15 @@ export class OrderBook {
     const updatedBids = [];
     const updatedAsks = [];
 
-    // Move mid price randomly ±0.1 to ±1.0
-    const midMove = (Math.random() - 0.5) * 2.0;
-    this.mid += midMove;
+    if (Math.random() < 0.3) {
+      // Only 30% of updates
+      const midMove = (Math.random() - 0.5) * 2.0;
+      this.mid += midMove;
 
-    // Rebuild bids/asks around new mid
-    this.bids = this.bids.map(([price, qty]) => {
-      const newPrice = (parseFloat(price) + midMove).toFixed(2);
-      return [newPrice, qty];
-    });
-
-    this.asks = this.asks.map(([price, qty]) => {
-      const newPrice = (parseFloat(price) + midMove).toFixed(2);
-      return [newPrice, qty];
-    });
+      // Rebuild around new mid
+      this.bids = this.generateInitialBook('bid');
+      this.asks = this.generateInitialBook('ask');
+    }
 
     // Randomly reduce 1-2 sizes on bids
     for (let i = 0; i < Math.min(2, this.bids.length); i++) {
