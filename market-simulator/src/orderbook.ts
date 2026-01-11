@@ -44,6 +44,7 @@ export class OrderBook {
 
   generateUpdate() {
     this.logger.info('Generating order book update');
+    const previousUpdateId = this.lastUpdateId;
     this.lastUpdateId++;
 
     const updatedBids = [];
@@ -126,8 +127,9 @@ export class OrderBook {
       e: 'depthUpdate',
       E: Date.now(),
       s: this.SYMBOL,
-      U: this.lastUpdateId - 1,
+      U: this.lastUpdateId,
       u: this.lastUpdateId,
+      pu: previousUpdateId,
       b: updatedBids,
       a: updatedAsks,
     };
