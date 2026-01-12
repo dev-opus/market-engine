@@ -15,6 +15,10 @@ export class FeedConnection {
   private synced = false;
   private lastUpdateId = 0;
   private buffer: DepthEvent[] = [];
+  private isReconnecting = false;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 10;
+  private readonly baseReconnectDelay = 1000; // 1 second
 
   private bids = new Map<string, string>();
   private asks = new Map<string, string>();
@@ -26,7 +30,33 @@ export class FeedConnection {
   ) {}
 
   start() {
-    this.ws = new WebSocket(this.baseUrl.replace('http', 'ws') + '/ws');
+    this.connect();
+  }
+
+  private connect() {
+    if (this.ws) {
+      this.ws.removeAllListeners();
+      if (
+        this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING
+      ) {
+        this.ws.close();
+      }
+    }
+
+    const wsUrl = this.baseUrl.replace('http', 'ws') + '/ws';
+    console.log(`[${this.exchange}] Connecting to ${wsUrl}...`);
+
+    this.ws = new WebSocket(wsUrl);
+
+    this.ws.on('open', () => {
+      console.log(`[${this.exchange}] WebSocket connected`);
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
+      this.synced = false;
+      this.buffer = [];
+      setTimeout(async () => await this.sync(), 1000);
+    });
 
     this.ws.on('message', (data: Buffer) => {
       const msg = JSON.parse(data.toString());
@@ -38,7 +68,48 @@ export class FeedConnection {
       }
     });
 
-    setTimeout(async () => await this.sync(), 1000);
+    this.ws.on('error', (error) => {
+      console.error(`[${this.exchange}] WebSocket error:`, error);
+    });
+
+    this.ws.on('close', (code, reason) => {
+      console.log(
+        `[${this.exchange}] WebSocket closed (code: ${code}, reason: ${reason.toString()})`,
+      );
+      this.synced = false;
+      this.buffer = [];
+      this.attemptReconnect();
+    });
+  }
+
+  private attemptReconnect() {
+    if (this.isReconnecting) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(
+        `[${this.exchange}] Max reconnection attempts reached. Stopping reconnection.`,
+      );
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      30000, // Max 30 seconds
+    );
+
+    console.log(
+      `[${this.exchange}] Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+    );
+
+    setTimeout(() => {
+      this.isReconnecting = false;
+      this.connect();
+    }, delay);
   }
 
   private async sync() {
