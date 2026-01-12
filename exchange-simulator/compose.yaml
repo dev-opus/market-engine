@@ -1,0 +1,31 @@
+services:
+  binance:
+    build: .
+    container_name: exchange-simulator-binance
+    environment:
+      EXCHANGE: binance
+      PORT: 3000
+      MID: 50000
+    ports:
+      - "3000:3000"
+
+  coinbase:
+    build: .
+    container_name: exchange-simulator-coinbase
+    environment:
+      EXCHANGE: coinbase
+      PORT: 3001
+      MID: 50010
+    ports:
+      - "3001:3001"
+
+  kraken:
+    build: .
+    container_name: exchange-simulator-kraken
+    environment:
+      EXCHANGE: kraken
+      PORT: 3002
+      MID: 50020
+    ports:
+      - "3002:3002"
+
