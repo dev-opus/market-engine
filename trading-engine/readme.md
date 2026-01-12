@@ -1,98 +1,210 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Trading Engine
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A real-time cryptocurrency arbitrage trading system built with NestJS that monitors multiple exchanges, detects price discrepancies, and executes arbitrage opportunities.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Architecture
 
-## Description
+The system follows a modular, event-driven architecture with three core components:
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- **Feed Module**: Connects to multiple exchanges via WebSocket, maintains order book state, and emits market data updates
+- **Arbitrage Module**: Monitors order book updates across exchanges, identifies profitable opportunities, and deduplicates using Redis
+- **Execution Module**: Handles the execution of identified arbitrage opportunities
 
-## Project setup
+Communication between modules is event-driven using NestJS EventEmitter2, enabling loose coupling and scalability.
 
-```bash
-$ npm install
+## Market Data
+
+### Order Book Management
+
+Each exchange connection (`FeedConnection`) maintains a local order book state:
+- **Bids/Asks**: Stored as `Map<price, quantity>` for efficient lookups
+- **Best Bid/Ask**: Calculated from the order book and emitted on every update
+- **Sequence Validation**: Tracks `lastUpdateId` to ensure message ordering integrity
+
+### Synchronization Flow
+
+1. **Initial Snapshot**: On connection, fetches full order book snapshot via REST API (`/api/v3/depth`)
+2. **Message Buffering**: Buffers WebSocket messages received before sync completes
+3. **Gap Detection**: Validates sequence numbers (`U`, `u`, `pu`) to detect missing updates
+4. **Replay**: Applies buffered messages in correct sequence order
+5. **Real-time Updates**: Processes incremental updates once synchronized
+
+### Event Emission
+
+On each order book change, emits `orderbook.update` events containing:
+```typescript
+{
+  exchange: string;
+  bestBid: number;
+  bestAsk: number;
+}
 ```
 
-## Compile and run the project
+## Arbitrage Logic
 
-```bash
-# development
-$ npm run start
+### Opportunity Detection
 
-# watch mode
-$ npm run start:dev
+The arbitrage module listens for `orderbook.update` events and maintains the latest best bid/ask for each exchange. When at least 2 exchanges have data:
 
-# production mode
-$ npm run start:prod
+1. **Find Best Prices**: Identifies the exchange with the lowest ask (best buy) and highest bid (best sell)
+2. **Calculate Profit**: `profit = bestSell.bid - bestBuy.ask`
+3. **Threshold Check**: Only considers opportunities with profit > $0.50
+4. **Deduplication**: Uses Redis to prevent processing the same opportunity within 60 seconds
+
+### Deduplication Strategy
+
+Creates a fingerprint from opportunity details:
+```
+buy:{exchange}-sell:{exchange}-buyPrice:{price}-sellPrice:{price}
 ```
 
-## Run tests
+Stored in Redis with 60-second expiration to prevent duplicate executions of the same opportunity.
 
-```bash
-# unit tests
-$ npm run test
+### Event Emission
 
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+When a profitable opportunity is found, emits `arbitrage.opportunity` event:
+```typescript
+{
+  buyFrom: string;
+  sellTo: string;
+  buyPrice: number;
+  sellPrice: number;
+  profit: number;
+  timestamp: number;
+}
 ```
 
-## Deployment
+## Fault Tolerance
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Automatic Reconnection
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+- **Exponential Backoff**: Reconnection delays start at 1s and double (1s, 2s, 4s, 8s...) up to 30s max
+- **Max Attempts**: Stops after 10 failed reconnection attempts
+- **State Reset**: On reconnection, resets sync state and buffer, re-syncs order book
+
+### Sequence Validation
+
+- **Out-of-Sequence Detection**: Validates that `event.pu === lastUpdateId` before processing
+- **Automatic Resync**: Triggers full resync if sequence gaps are detected
+- **Gap Recovery**: Validates buffered messages have continuous sequence numbers
+
+### Error Handling
+
+- **WebSocket Errors**: Logged but don't trigger immediate reconnection (close event handles it)
+- **Sync Failures**: Automatically retries sync if initial snapshot or message replay fails
+- **Redis Errors**: Logged to console (connection failures would prevent deduplication but not crash the system)
+
+## Execution
+
+The execution module listens for `arbitrage.opportunity` events and handles trade execution:
+
+- **Logging**: Logs opportunity details (exchanges, prices, expected profit)
+- **Placeholder**: Currently logs execution; actual order placement logic to be implemented
+- **Event Emission**: Emits `execution.completed` event for downstream processing/persistence
+
+## How to Run
+
+### Prerequisites
+
+1. **Node.js**: v18+ (check with `node --version`)
+2. **Redis**: Running instance accessible via `REDIS_URL`
+3. **Exchange Simulators**: Two or more exchange-simulator instances running (see `../exchange-simulator/readme.md`)
+
+### Installation
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm install
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Environment Variables
 
-## Resources
+Create a `.env` file or set the following environment variables:
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+# Server port (optional, defaults to 3000)
+PORT=3000
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+# Redis connection URL
+REDIS_URL=redis://localhost:6379
 
-## Support
+# Exchange configurations (JSON object mapping exchange names to base URLs)
+EXCHANGES_AND_BASE_URLS='{"binance":"http://localhost:3000","coinbase":"http://localhost:3001"}'
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+**Example with multiple exchanges:**
+```bash
+EXCHANGES_AND_BASE_URLS='{"exchange1":"http://localhost:3000","exchange2":"http://localhost:3001","exchange3":"http://localhost:3002"}'
+```
 
-## Stay in touch
+### Running the Application
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+**Development mode (with hot reload):**
+```bash
+npm run start:dev
+```
 
-## License
+**Production mode:**
+```bash
+npm run build
+npm run start:prod
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+**Standard start:**
+```bash
+npm start
+```
+
+### Example Setup
+
+1. **Start Redis:**
+   ```bash
+   redis-server
+   # Or with Docker:
+   docker run -d -p 6379:6379 redis:alpine
+   ```
+
+2. **Start Exchange Simulators** (in separate terminals):
+   ```bash
+   # Terminal 1 - Exchange 1
+   cd ../exchange-simulator
+   EXCHANGE=binance PORT=3000 MID=50000 npm run dev
+
+   # Terminal 2 - Exchange 2
+   EXCHANGE=coinbase PORT=3001 MID=50010 npm run dev
+   ```
+
+3. **Start Trading Engine:**
+   ```bash
+   cd trading-engine
+   REDIS_URL=redis://localhost:6379 EXCHANGES_AND_BASE_URLS='{"binance":"http://localhost:3000","coinbase":"http://localhost:3001"}' npm run start:dev
+   ```
+
+### Verification
+
+Once running, you should see:
+- Connection logs for each exchange: `[exchange] Connecting to ws://...`
+- WebSocket connection confirmations: `[exchange] WebSocket connected`
+- Order book updates being processed
+- Arbitrage opportunities logged when profit > $0.50 detected
+- Execution logs when opportunities are processed
+
+## Infrastructure Requirements
+
+- **Redis Server**: Required for arbitrage opportunity deduplication
+- **Exchange Data Sources**: WebSocket and REST API endpoints (exchange-simulator)
+
+## Event Flow
+
+```
+Exchange WebSocket → FeedConnection → orderbook.update event
+                                              ↓
+                                    Arbitrage Module
+                                              ↓
+                                    (if profitable)
+                                              ↓
+                                    arbitrage.opportunity event
+                                              ↓
+                                    Execution Module
+                                              ↓
+                                    execution.completed event
+```
