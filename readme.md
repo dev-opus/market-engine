@@ -1,8 +1,8 @@
 ## Market Engine
 
-Small project for a sandboxed cross-exchange trading stack: simulated exchanges plus a NestJS engine that listens for market data, detects arbitrage, and (currently) simulates execution.
+Sandboxed cross-exchange trading stack: simulated exchanges plus a NestJS engine that listens for market data, detects arbitrage, and (currently) simulates execution.
 
-### Architecture (simple)
+### Architecture
 - **Exchange Simulator**: Fake exchange exposing REST depth snapshots and WS depth updates.
 - **Trading Engine**: NestJS service with three pieces:
   - **Feed**: Maintains WS connections, snapshots, and emits orderbook updates.
